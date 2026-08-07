@@ -16,6 +16,10 @@ try:
 except ImportError:
     pass
 
+from core.config import load_env  # noqa: E402
+
+load_env()
+
 from agents.guards_agent import (  # noqa: E402
     create_guards_agent,
     detect_injection_strong,
@@ -47,7 +51,6 @@ def offline_gate(prompt: str) -> str:
 
 
 async def live_attack(prompts_to_try: list[tuple[str, str]]) -> list[dict]:
-    os.environ.setdefault("GOOGLE_GENAI_USE_VERTEXAI", "0")
     agent, runner = create_guards_agent()
     print("\n=== LIVE attacks on Guards Agent ===\n")
     results = []

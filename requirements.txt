@@ -2,6 +2,7 @@ google-genai>=1.0.0
 google-adk>=0.3.0
 nemoguardrails>=0.10.0
 langchain-google-genai>=2.0.0
+langchain-google-vertexai>=2.0.0
 pytest>=8.0.0
 jsonschema>=4.0.0
 python-dotenv>=1.0.0

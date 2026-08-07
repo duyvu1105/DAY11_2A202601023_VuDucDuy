@@ -1,7 +1,16 @@
 """
 Lab 11 — Helper Utilities
 """
+from __future__ import annotations
+
+from core.config import load_env
+
 from google.genai import types
+
+
+# Load .env (Vertex AI project/location/model) before any agent is created,
+# even when a script imports utils directly without going through main.py.
+load_env()
 
 
 async def chat_with_agent(agent, runner, user_message: str, session_id=None):

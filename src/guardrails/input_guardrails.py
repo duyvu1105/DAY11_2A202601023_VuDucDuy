@@ -4,13 +4,36 @@ Lab 11 — Part 2A: Input Guardrails
   TODO 2: Topic filter
   TODO 3: Input Guardrail Plugin (ADK)
 """
+from __future__ import annotations
+
 import re
+import unicodedata
 
 from google.genai import types
 from google.adk.plugins import base_plugin
 from google.adk.agents.invocation_context import InvocationContext
 
 from core.config import ALLOWED_TOPICS, BLOCKED_TOPICS
+
+
+# Invisible / zero-width Unicode characters used to smuggle instructions past
+# naive keyword checks (e.g. ``Ignore\u200b all previous instructions``).
+ZERO_WIDTH_CHARS = "\u200b\u200c\u200d\ufeff\u2060"
+
+
+def canonicalize(text: str) -> str:
+    """Canonicalize Unicode + invisible spacing before detection.
+
+    1. NFKC folds compatibility characters (full-width, ligatures, …).
+    2. Remove zero-width / invisible separators.
+    3. Strip diacritics so Vietnamese attacks (``Bỏ qua mọi hướng dẫn``) and
+       spacing tricks collapse to a predictable ASCII form.
+    """
+    text = unicodedata.normalize("NFKC", text or "")
+    text = text.translate(str.maketrans("", "", ZERO_WIDTH_CHARS))
+    decomposed = unicodedata.normalize("NFKD", text)
+    ascii_folded = "".join(c for c in decomposed if not unicodedata.combining(c))
+    return ascii_folded.casefold()
 
 
 # ============================================================
@@ -33,7 +56,7 @@ from core.config import ALLOWED_TOPICS, BLOCKED_TOPICS
 # ============================================================
 
 def detect_injection(user_input: str) -> bool:
-    """Detect prompt injection patterns in user input.
+    """Detect prompt injection patterns in user input (EN + VI, obfuscation).
 
     Args:
         user_input: The user's message
@@ -41,14 +64,64 @@ def detect_injection(user_input: str) -> bool:
     Returns:
         True if injection detected, False otherwise
     """
+    # Patterns run on the canonical (Unicode-folded, invisible-char-stripped,
+    # diacritic-stripped, lowercase) text.  ``\s+`` also absorbs zero-width
+    # gaps left by any separator we did not strip.
     INJECTION_PATTERNS = [
-        # TODO: Add at least 5 regex patterns
-        # Example:
-        # r"ignore (all )?(previous|above) instructions",
+        # --- Direct instruction override (EN) ---
+        r"ignore\s+(all\s+)?(previous|above|prior)?\s*instructions?",
+        r"disregard\s+(all\s+)?(previous|above|prior)?\s*(instructions?|rules?)",
+        r"forget\s+(all\s+)?(previous|above|prior)?\s*(instructions?|rules?|prompt)",
+        r"override\s+(your\s+)?(system\s+)?(prompt|instructions?)",
+        r"system\s+(prompt|instruction|message)",
+        r"developer\s+(mode|prompt|instruction)",
+        r"(reveal|disclose|show|leak|print|dump|output)\s+(your\s+)?(system\s+)?(prompt|instructions?|config|secrets?)",
+        r"reveal\s+(your\s+)?(instructions?|prompt|password|api\s*key|secret)",
+        r"tell\s+(me\s+)?(your\s+)?(system\s+)?(prompt|instructions?|password|api\s*key)",
+        # --- Role confusion / jailbreak ---
+        r"you\s+are\s+now\b",
+        r"pretend\s+(you\s+are|to\s+be)",
+        r"act\s+as\s+(a\s+|an\s+)?(unrestricted|evil|jailbroken|developer)",
+        # DAN only counts as a jailbreak when paired with role/unrestricted
+        # context, so a customer called "Dan" is not blocked by accident.
+        r"(?:as\s+)?dan\b.*(?:unrestricted|jailbreak|no\s+rules|evil|dungeon)",
+        r"(?:unrestricted|jailbreak|no\s+rules).*\bdan\b",
+        r"jailbreak|jail\s*broken",
+        r"developer\s+mode",
+        # --- Authority / ticket attacks ---
+        r"\bCISO\b|ticket\s+SEC-\d+|compliance\s+audit.*(password|credential|api\s*key)",
+        # --- Extraction / fill-in / DB ---
+        r"fill\s+in\s*(the\s*)?(blank|blanks|__+|db|database|connection\s*string)",
+        r"connection\s+string",
+        r"password\s*[:=]\s*\S+",
+        r"api\s*key\s*[:=]\s*\S+",
+        r"database\s+(host|url|string|config)",
+        r"db\.vinbank\.internal",
+        # --- Translation / reformatting the system prompt ---
+        r"translate\s+(your\s+)?(system\s+)?(prompt|instructions?|rules?|config)",
+        r"(output|write|print)\s+(your\s+)?(system\s+)?(prompt|instructions?|config)\s+(as|in)\s+(json|yaml|xml|base64|rot13)",
+        r"convert\s+(your\s+)?(instructions?|system\s+prompt|config)\s+to\s+(base64|rot13|binary|hex)",
+        r"encode\s+(your\s+)?(instructions?|prompt|password|secret)",
+        # --- Creative / story / hypothetical wrappers ---
+        r"(write|create|tell)\s+a\s+story.*(password|credential|api\s*key|secret)",
+        r"hypotheticall?y.*(password|api\s*key|secret|credential)",
+        r"same\s+(password|credentials|secrets)\s+as\s+(you|this\s+assistant|your)",
+        # --- Confirmation side-channel ---
+        r"confirm\s+(that\s+)?(the\s+)?(admin\s+)?(password|api\s*key)\b",
+        r"i\s+already\s+know\s+(the\s+)?(admin\s+)?(password|api\s*key)",
+        # --- Vietnamese injection (accent-insensitive) ---
+        r"bo\s+qua\s+(moi\s+)?(huong\s+dan|chi\s+dan|quy\s+tac|luat)",
+        r"quen\s+(moi\s+)?(huong\s+dan|chi\s+dan|quy\s+tac)",
+        r"tiet\s+lo\s+(mat\s+khau|api|secret|thong\s+tin)",
+        r"mat\s+khau\s*(?:la|=|:)",
+        r"cho\s+toi\s+(xem\s+)?(mat\s+khau|system\s*prompt|api\s*key)",
+        r"xem\s+(he\s+thong\s+)?(prompt|huong\s+dan)",
+        r"ban\s+la\s+DAN",
+        r"gia\s+lap\s+(ban\s+la|nhu\s+la)",
     ]
 
     for pattern in INJECTION_PATTERNS:
-        if re.search(pattern, user_input, re.IGNORECASE):
+        if re.search(pattern, canonicalize(user_input)):
             return True
     return False
 
@@ -72,14 +145,22 @@ def topic_filter(user_input: str) -> bool:
     Returns:
         True if input should be BLOCKED (off-topic or blocked topic)
     """
-    input_lower = user_input.lower()
+    input_norm = canonicalize(user_input)
 
-    # TODO: Implement logic:
-    # 1. If input contains any blocked topic -> return True
-    # 2. If input doesn't contain any allowed topic -> return True
-    # 3. Otherwise -> return False (allow)
+    # 1. Immediate reject: blocked topics (hack, weapon, gambling, …).
+    if any(re.search(rf"\b{re.escape(canonicalize(topic))}\b", input_norm) for topic in BLOCKED_TOPICS):
+        return True
 
-    pass  # Replace with your implementation
+    # 2. Allow if a banking topic appears (EN or VI, diacritic-insensitive).
+    allowed_hits = [
+        re.search(rf"\b{re.escape(canonicalize(topic))}\b", input_norm)
+        for topic in ALLOWED_TOPICS
+    ]
+    if any(allowed_hits):
+        return False
+
+    # 3. Off-topic: no banking signal at all.
+    return True
 
 
 # ============================================================
@@ -132,14 +213,22 @@ class InputGuardrailPlugin(base_plugin.BasePlugin):
         self.total_count += 1
         text = self._extract_text(user_message)
 
-        # TODO: Implement logic:
-        # 1. Call detect_injection(text)
-        #    - If True: increment blocked_count, return self._block_response("...")
-        # 2. Call topic_filter(text)
-        #    - If True: increment blocked_count, return self._block_response("...")
-        # 3. If both are False: return None (let message through)
+        if detect_injection(text):
+            self.blocked_count += 1
+            return self._block_response(
+                "Tôi không thể xử lý yêu cầu này. "
+                "Tôi chỉ hỗ trợ các câu hỏi ngân hàng VinBank. "
+                "I cannot process that request. I only help with VinBank banking questions."
+            )
 
-        pass  # Replace with your implementation
+        if topic_filter(text):
+            self.blocked_count += 1
+            return self._block_response(
+                "Tôi là trợ lý VinBank và chỉ có thể hỗ trợ các câu hỏi liên quan đến ngân hàng. "
+                "I'm a VinBank assistant and can only help with banking-related questions."
+            )
+
+        return None
 
 
 # ============================================================

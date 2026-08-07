@@ -146,10 +146,9 @@ venv.bak/
 
 # Local grade / run outputs
 outputs/grade_report.json
-outputs/results.json
-outputs/attack_results.json
-outputs/audit_log.json
-outputs/metrics.json
+# NOTE: outputs/results.json, outputs/attack_results.json,
+# outputs/audit_log.json, outputs/metrics.json are REQUIRED by SUBMISSION.md
+# and are intentionally tracked (not ignored).
 
 # Spyder project settings
 .spyderproject
