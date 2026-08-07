@@ -148,8 +148,13 @@ class DefensePipeline:
         *,
         user_id: str = "student",
         request_id: str | None = None,
+        session_id: str | None = None,
     ) -> dict:
-        """Run one user message through every layer and return the outcome."""
+        """Run one user message through every layer and return the outcome.
+
+        Pass a ``session_id`` returned by a previous call to keep the same
+        conversation (multi-turn chat); omit it to start a new conversation.
+        """
         request_id = self.audit.record_input(
             user_id=user_id, text=text, request_id=request_id
         )
@@ -173,6 +178,7 @@ class DefensePipeline:
                 "layer": layer,
                 "response": message,
                 "response_preview": message[:300],
+                "session_id": session_id,
             }
 
         # 2) Input guardrails.
@@ -192,11 +198,14 @@ class DefensePipeline:
                 "layer": layer,
                 "response": message,
                 "response_preview": message[:300],
+                "session_id": session_id,
             }
 
         # 3) LLM + 4) output guardrails (plugin wired into the runner).
         try:
-            response, _ = await chat_with_agent(self.agent, self.runner, text)
+            response, session = await chat_with_agent(
+                self.agent, self.runner, text, session_id=session_id
+            )
         except Exception as exc:  # network / model hiccup → fail open with error
             response = f"Error: {type(exc).__name__}: {exc}"
             self.audit.record_output(
@@ -212,6 +221,7 @@ class DefensePipeline:
                 "layer": "error",
                 "response": response,
                 "response_preview": response[:300],
+                "session_id": session_id,
             }
 
         # Classify whether the output layer intervened (counters or markers).
@@ -235,6 +245,7 @@ class DefensePipeline:
             "layer": None,
             "response": response,
             "response_preview": response[:300],
+            "session_id": getattr(session, "id", session_id),
         }
 
 

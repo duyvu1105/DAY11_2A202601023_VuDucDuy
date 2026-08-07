@@ -158,6 +158,18 @@ Colab / Jupyter (tuỳ chọn): `notebooks/lab11_guardrails_hitl.ipynb`. Local l
 
 Nộp theo [`SUBMISSION.md`](SUBMISSION.md).
 
+## Chat UI (tuỳ chọn)
+
+Giao diện web để chat trực tiếp với agent hiện tại của lab (Guards / Protected
+pipeline / Unsafe), có streaming, giữ hội thoại theo từng agent và hiển thị
+monitoring của pipeline bảo vệ:
+
+```powershell
+streamlit run chat_ui.py
+```
+
+Chi tiết trong [`chat_ui.py`](chat_ui.py).
+
 ---
 
 ## Cấu trúc repo

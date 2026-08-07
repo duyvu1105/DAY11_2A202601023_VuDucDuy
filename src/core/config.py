@@ -47,12 +47,12 @@ def load_env() -> None:
 def get_model() -> str:
     """Return the plain model id configured in ``.env``.
 
-    ``MODEL=vertex_ai/gemini-3.6-flash`` is a provider-qualified name.  The
+    ``MODEL=vertex_ai/gemini-3.1-flash-lite`` is a provider-qualified name.  The
     google-genai / ADK SDKs already know which backend to use from
     ``GOOGLE_GENAI_USE_VERTEXAI`` + project/location env vars, so we strip the
     ``vertex_ai/`` prefix and hand the SDK the bare model id.
     """
-    model = os.environ.get("MODEL", "").strip() or "gemini-3.6-flash"
+    model = os.environ.get("MODEL", "").strip() or "gemini-3.1-flash-lite"
     if "/" in model and model.split("/", 1)[0] in {
         "vertex_ai",
         "google_ai",
